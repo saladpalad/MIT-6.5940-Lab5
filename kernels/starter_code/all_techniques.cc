@@ -67,9 +67,46 @@ static void *all_techniques_worker_func(void *args) {
                 // lowbit mask
                 const uint8x16_t mask_low4bit = vdupq_n_u8(0xf);
 
+                // (1)
+                uint8x16_t w_de_0 = vandq_u8(w0, mask_low4bit);
+                uint8x16_t w_de_1 = vandq_u8(w1, mask_low4bit);
+                uint8x16_t w_de_2 = vandq_u8(w2, mask_low4bit);
+                uint8x16_t w_de_3 = vandq_u8(w3, mask_low4bit);
+                
+                // (2)
+                uint8x16_t w_de_16 = vshrq_n_u8(w0, 4);
+                uint8x16_t w_de_17 = vshrq_n_u8(w1, 4);
+                uint8x16_t w_de_18 = vshrq_n_u8(w2, 4);
+                uint8x16_t w_de_19 = vshrq_n_u8(w3, 4);
+
+                // (3)
+                int8x16_t w_de_0_v2 = vreinterpretq_s8_u8(w_de_0);
+                int8x16_t w_de_16_v2 = vreinterpretq_s8_u8(w_de_16);
+
+                int8x16_t w_de_1_v2 = vreinterpretq_s8_u8(w_de_1);
+                int8x16_t w_de_17_v2 = vreinterpretq_s8_u8(w_de_17);
+
+                int8x16_t w_de_2_v2 = vreinterpretq_s8_u8(w_de_2);
+                int8x16_t w_de_18_v2 = vreinterpretq_s8_u8(w_de_18);
+
+                int8x16_t w_de_3_v2 = vreinterpretq_s8_u8(w_de_3);
+                int8x16_t w_de_19_v2 = vreinterpretq_s8_u8(w_de_19);
+
                 // TODO: apply zero_point to weights and convert the range from (0, 15) to (-8, 7)
                 // Hint: using `vsubq_s8` to the lower-half and upper-half vectors of weights
                 const int8x16_t offsets = vdupq_n_s8(8);
+
+                int8x16_t w_de_0_v3 = vsubq_s8(w_de_0_v2, offsets);
+                int8x16_t w_de_16_v3 = vsubq_s8(w_de_16_v2, offsets);
+
+                int8x16_t w_de_1_v3 = vsubq_s8(w_de_1_v2, offsets);
+                int8x16_t w_de_17_v3 = vsubq_s8(w_de_17_v2, offsets);
+
+                int8x16_t w_de_2_v3 = vsubq_s8(w_de_2_v2, offsets);
+                int8x16_t w_de_18_v3 = vsubq_s8(w_de_18_v2, offsets);
+
+                int8x16_t w_de_3_v3 = vsubq_s8(w_de_3_v2, offsets);
+                int8x16_t w_de_19_v3 = vsubq_s8(w_de_19_v2, offsets);
 
                 // load 128 8-bit activation
                 const int8x16_t a0 = vld1q_s8(a_start);
@@ -85,6 +122,23 @@ static void *all_techniques_worker_func(void *args) {
                 // TODO: perform dot product and store the result into the intermediate sum, int_sum0
                 // Hint: use `vdotq_s32` and store the sum for each block in int_sum{0-3}
                 int32x4_t int_sum0, int_sum1, int_sum2, int_sum3;
+
+                int_sum0 = vdupq_n_s32(0);
+                int_sum1 = vdupq_n_s32(0);
+                int_sum2 = vdupq_n_s32(0);
+                int_sum3 = vdupq_n_s32(0);
+
+                int_sum0 = vdotq_s32(int_sum0, w_de_0_v3, a0);
+                int_sum0 = vdotq_s32(int_sum0, w_de_16_v3, a1);
+
+                int_sum1 = vdotq_s32(int_sum1, w_de_1_v3, a2);
+                int_sum1 = vdotq_s32(int_sum1, w_de_17_v3, a3);
+
+                int_sum2 = vdotq_s32(int_sum2, w_de_2_v3, a4);
+                int_sum2 = vdotq_s32(int_sum2, w_de_18_v3, a5);
+
+                int_sum3 = vdotq_s32(int_sum3, w_de_3_v3, a6);
+                int_sum3 = vdotq_s32(int_sum3, w_de_19_v3, a7);
 
                 float s_0 = *s_a++ * *s_w++;
                 float s_1 = *s_a++ * *s_w++;
@@ -222,7 +276,17 @@ void MatmulOperator::mat_mul_all_techniques(struct matmul_params *params) {
     assert(params->block_size == 32);  // support block size 32 for now
 
     // TODO: Thread creation
+    for (j = 0; j < num_thread; j++){
+        threads_args[j].start_j = j * (C->column / num_thread);
+        threads_args[j].end_j = (j + 1) * (C->column / num_thread);
+        threads_args[j].params = params;
+        pthread_create(&thread_pool[j], NULL, all_techniques_worker_func, &threads_args[j]);
+    }
+
 
     // TODO: Join threads
+    for (int i = 0; i < num_thread; i++){
+        pthread_join(thread_pool[i], NULL);
+    }
 };
 }  // namespace matmul
